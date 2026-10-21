@@ -102,3 +102,69 @@ def test_matching_is_case_insensitive(db):
     assert len(matches) == 1
     assert matches[0]["title"] == "Python assignment"
 
+
+def test_list_tasks_empty(db):
+    result = tm.tool_list_tasks("pending", db_path=db)
+    assert result["status"] == "success"
+    assert result["data"]["tasks"] == []
+    assert "no pending" in result["message"].lower()
+
+
+def test_complete_by_id(db):
+    added = tm.tool_add_task("Read chapter", "2026-10-22", db_path=db)
+    task_id = added["data"]["task"]["id"]
+    result = tm.tool_complete_task(str(task_id), db_path=db)
+    assert result["status"] == "success"
+
+
+def test_details_not_found(db):
+    result = tm.tool_get_task_details("Gym", db_path=db)
+    assert result["status"] == "not_found"
+
+
+def test_list_completed(db):
+    tm.tool_add_task("Read chapter", "2026-10-22", db_path=db)
+    tm.tool_complete_task("Read chapter", db_path=db)
+    result = tm.tool_list_tasks("completed", db_path=db)
+    assert len(result["data"]["tasks"]) == 1
+
+
+def test_invalid_status(db):
+    result = tm.tool_list_tasks("everything", db_path=db)
+    assert result["status"] == "error"
+
+
+def test_tool_add_needs_due_date(db):
+    result = tm.tool_add_task("Buy milk", None, db_path=db)
+    assert result["status"] == "needs_due_date"
+
+
+def test_tool_invalid_date(db):
+    result = tm.tool_add_task("Buy milk", "2026-02-30", db_path=db)
+    assert result["status"] == "invalid_date"
+
+
+def test_complete_ambiguous(db):
+    tm.tool_add_task("Python assignment", "2026-10-22", db_path=db)
+    tm.tool_add_task("GenAI assignment", "2026-10-23", db_path=db)
+    result = tm.tool_complete_task("assignment", db_path=db)
+    assert result["status"] == "ambiguous"
+    assert len(result["data"]["candidates"]) == 2
+
+
+def test_already_completed(db):
+    tm.tool_add_task("Python assignment", "2026-10-22", db_path=db)
+    tm.tool_complete_task("Python assignment", db_path=db)
+    result = tm.tool_complete_task("Python assignment", db_path=db)
+    assert result["status"] == "already_completed"
+
+
+def test_details_include_due_and_status(db):
+    tm.tool_add_task("GenAI assignment", "2026-10-22", db_path=db)
+    result = tm.tool_get_task_details("GenAI assignment", db_path=db)
+    assert result["status"] == "success"
+    task = result["data"]["task"]
+    assert task["due_date"] == "2026-10-22"
+    assert task["status"] == "pending"
+
+

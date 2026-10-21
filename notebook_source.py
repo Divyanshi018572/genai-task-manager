@@ -276,4 +276,176 @@ def find_tasks(phrase: str, status: str = "all", db_path: str = DB_PATH) -> list
         return []
     return [task for score, task in scored if score == best_score]
 
+# %% [markdown]
+# ### 3.4 Tools and result shape
+#
+# The model chooses one tool. Python validates the arguments, calls SQLite, and
+# returns a small dictionary with a status, a message, and optional data.
+
+# %%
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "add_task",
+            "description": "Create a task with a title and a due date. Omit due_date if the user did not give one; the tool will ask for it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short task title."},
+                    "due_date": {"type": "string", "description": "Due date in YYYY-MM-DD format. Omit it if the user did not give one."},
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tasks",
+            "description": "List tasks by status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["pending", "completed", "all"]},
+                },
+                "required": ["status"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_task",
+            "description": "Mark one task as completed. Use a title fragment or task ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_ref": {"type": "string", "description": "Title fragment or numeric task ID."},
+                },
+                "required": ["task_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_task_details",
+            "description": "Get the due date and status of one task.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_ref": {"type": "string", "description": "Title fragment or numeric task ID."},
+                },
+                "required": ["task_ref"],
+            },
+        },
+    },
+]
+
+
+def tool_add_task(title: str, due_date: str | None = None, db_path: str = DB_PATH) -> dict:
+    title = (title or "").strip()
+    if not title:
+        return {"status": "error", "message": "Task title cannot be empty."}
+    if due_date is None or not str(due_date).strip():
+        return {
+            "status": "needs_due_date",
+            "message": f"What due date should I use for '{title}'?",
+        }
+    return add_task(title, due_date, db_path)
+
+
+def tool_list_tasks(status: str = "pending", db_path: str = DB_PATH) -> dict:
+    if status not in {"pending", "completed", "all"}:
+        return {"status": "error", "message": "Status must be pending, completed, or all."}
+    tasks = list_tasks(status, db_path)
+    for task in tasks:
+        task["overdue"] = task["status"] == "pending" and task["due_date"] < date.today().isoformat()
+    if not tasks:
+        message = "No tasks yet." if status == "all" else f"No {status} tasks."
+    elif status == "all":
+        message = f"Found {len(tasks)} task(s)."
+    else:
+        message = f"Found {len(tasks)} {status} task(s)."
+    return {"status": "success", "message": message, "data": {"tasks": tasks}}
+
+
+def tool_complete_task(task_ref: str, db_path: str = DB_PATH) -> dict:
+    task_ref = (task_ref or "").strip()
+    if not task_ref:
+        return {"status": "error", "message": "Tell me which task to complete."}
+    matches = find_tasks(task_ref, status="pending", db_path=db_path)
+    if len(matches) > 1:
+        return {
+            "status": "ambiguous",
+            "message": f"I found {len(matches)} tasks. Which one?",
+            "data": {"candidates": [{"id": task["id"], "title": task["title"]} for task in matches]},
+        }
+    if not matches:
+        completed = find_tasks(task_ref, status="completed", db_path=db_path)
+        if len(completed) == 1:
+            return {"status": "already_completed", "message": f"'{completed[0]['title']}' is already completed.", "data": {"task": completed[0]}}
+        return {"status": "not_found", "message": f"I could not find a pending task matching '{task_ref}'.", "data": {"suggestions": suggestions_for(task_ref, db_path)}}
+    task = matches[0]
+    complete_task(task["id"], db_path)
+    return {"status": "success", "message": f"Marked '{task['title']}' as completed.", "data": {"task": get_task(task["id"], db_path)}}
+
+
+def tool_get_task_details(task_ref: str, db_path: str = DB_PATH) -> dict:
+    task_ref = (task_ref or "").strip()
+    if not task_ref:
+        return {"status": "error", "message": "Tell me which task to look up."}
+    matches = find_tasks(task_ref, status="all", db_path=db_path)
+    if len(matches) > 1:
+        return {
+            "status": "ambiguous",
+            "message": f"I found {len(matches)} tasks. Which one?",
+            "data": {"candidates": [{"id": task["id"], "title": task["title"]} for task in matches]},
+        }
+    if not matches:
+        return {"status": "not_found", "message": f"I could not find a task matching '{task_ref}'.", "data": {"suggestions": suggestions_for(task_ref, db_path)}}
+    task = matches[0]
+    return {
+        "status": "success",
+        "message": f"'{task['title']}' is {task['status']} and due on {task['due_date']}.",
+        "data": {"task": task},
+    }
+
+
+def suggestions_for(phrase: str, db_path: str = DB_PATH) -> list[dict]:
+    scored = [
+        (token_overlap(phrase, task["title"]), task)
+        for task in list_tasks("pending", db_path)
+    ]
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {"id": task["id"], "title": task["title"]}
+        for score, task in scored
+        if score > 0
+    ][:3]
+
+
+TOOL_FUNCTIONS = {
+    "add_task": tool_add_task,
+    "list_tasks": tool_list_tasks,
+    "complete_task": tool_complete_task,
+    "get_task_details": tool_get_task_details,
+}
+
+
+def execute_tool(name: str, arguments: dict, db_path: str = DB_PATH) -> dict:
+    function = TOOL_FUNCTIONS.get(name)
+    if function is None:
+        return {"status": "error", "message": f"Unknown tool: {name}"}
+    if not isinstance(arguments, dict):
+        return {"status": "error", "message": "Tool arguments must be an object."}
+    try:
+        return function(db_path=db_path, **arguments)
+    except TypeError as error:
+        return {"status": "error", "message": f"Invalid tool arguments: {error}"}
+    except Exception as error:
+        return {"status": "error", "message": f"Tool failed: {error}"}
+
+
 
