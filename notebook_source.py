@@ -265,10 +265,11 @@ def parse_due_date(text: str, today: date | None = None):
 
 
 def extract_create_title(text: str, date_phrase: str | None) -> str:
-    title = text.strip()
-    title = re.sub(r"(?i)^\s*(please\s+)?(add|create|make|schedule)\s+(a\s+|an\s+)?(task|reminder|todo)\s*(to|for|:)?\s*", "", title)
-    title = re.sub(r"(?i)^\s*remind\s+me\s+to\s+", "", title)
-    title = re.sub(r"(?i)^\s*(i\s+need\s+to|i\s+have\s+to|remember\s+to)\s+", "", title)
+    title = text.strip().strip(" .,!?:;")
+    title = re.sub(r"(?i)^\s*(please\s+)?(add|create|make|schedule)\s+(a\s+|an\s+|the\s+)?(task|reminder|todo)\s*(to|for|:)?\s*", "", title)
+    title = re.sub(r"(?i)^\s*(make\s+sure\s+to|remind\s+me\s+to|remember\s+to)\s+", "", title)
+    title = re.sub(r"(?i)^\s*(i\s+need\s+to|i\s+have\s+to)\s+", "", title)
+    title = re.sub(r"(?i)^\s*(please\s+)?(add|create|make|schedule)\s+(a\s+|an\s+|the\s+)?", "", title)
     if date_phrase:
         title = re.sub(r"(?i)\s*\b(by|on|before|due|until)\b\s*" + re.escape(date_phrase), "", title)
         title = re.sub(r"(?i)\s*" + re.escape(date_phrase) + r"\s*$", "", title)

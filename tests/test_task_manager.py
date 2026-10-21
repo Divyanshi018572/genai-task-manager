@@ -94,6 +94,10 @@ def test_extract_title():
     assert tm.extract_create_title(
         "Add task: submit report on 25 Oct 2026", "25 Oct 2026"
     ) == "Submit report"
+    assert tm.extract_create_title(
+        "Add a task to buy milk tomorrow.", "tomorrow"
+    ) == "Buy milk"
+    assert tm.extract_create_title("Add buy milk tomorrow.", "tomorrow") == "Buy milk"
 
 
 def test_matching_is_case_insensitive(db):

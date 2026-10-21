@@ -1,6 +1,7 @@
 # Runtime, optional in offline mode
 openai>=1.40,<4
 python-dotenv>=1.0,<2
+streamlit>=1.50,<2
 
 # Development and notebook build
 pytest>=8.0,<10

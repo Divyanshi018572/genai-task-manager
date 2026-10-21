@@ -1,4 +1,4 @@
-# AI-Powered Personal Task Manager
+﻿# AI-Powered Personal Task Manager
 
 A Jupyter notebook that manages tasks from natural-language requests. It creates
 tasks, lists pending work, completes tasks, and shows task details. It runs offline
@@ -16,12 +16,26 @@ pip install -r requirements.txt
 Run the tests:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_task_manager.py -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 Open `task_manager.ipynb` in Jupyter and run all cells. Offline mode is the default
 and needs no key. The notebook creates its own demo database in the system temp
 directory.
+
+## Streamlit UI
+
+Run the local web UI:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+Open http://localhost:8501. The sidebar switches between the offline parser and the
+NVIDIA model, and includes a database reset. The main area has the chat, a live task
+table, add and complete forms, and task details. The UI uses `ui_tasks.db`; override
+it with the `TASK_DB_PATH` environment variable. Streamlit is a local interface and
+does not run inside Google Colab.
 
 ## Google Colab
 
@@ -61,7 +75,10 @@ fails, the agent falls back to the local parser.
 |---|---|
 | `notebook_source.py` | Reviewable jupytext source for the notebook. |
 | `task_manager.ipynb` | Generated and executed notebook deliverable. |
+| `streamlit_app.py` | Local Streamlit chat-and-task interface. |
 | `tests/test_task_manager.py` | Offline pytest suite. |
+| `tests/test_streamlit_helpers.py` | UI helper tests. |
+| `tests/test_streamlit_app.py` | Streamlit AppTest flow tests. |
 | `scripts/check_provider.py` | Optional live provider smoke test. |
 | `scripts/check_secrets.py` | Blocks common key patterns before commit. |
 | `docs/SPEC.md` | Problem, requirements, and non-goals. |
@@ -86,3 +103,4 @@ titles return suggestions, and missing or impossible dates never write a row.
 Single user, local SQLite, English date phrases, token-overlap matching, and no
 reminders or recurrence. The live model path is optional and is not exercised by
 the automated tests.
+
