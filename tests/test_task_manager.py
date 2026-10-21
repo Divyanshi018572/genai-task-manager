@@ -191,6 +191,13 @@ def test_local_parser_missing_due_date():
     assert call["arguments"]["due_date"] is None
 
 
+def test_local_parser_add_with_finish_word():
+    call = tm.parse_local_intent("Add a task to finish the Python assignment by 2026-10-28.", TODAY)
+    assert call["name"] == "add_task"
+    assert call["arguments"]["title"] == "Finish the Python assignment"
+    assert call["arguments"]["due_date"] == "2026-10-28"
+
+
 def test_local_parser_details():
     call = tm.parse_local_intent("When is the GenAI assignment due?", TODAY)
     assert call["name"] == "get_task_details"

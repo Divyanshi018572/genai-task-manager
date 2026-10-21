@@ -3,17 +3,40 @@
 #
 # ## 1. Problem understanding and proposed approach
 #
+# A personal task manager should remove the friction between thinking of a task and
+# recording it. Typing into a form is slow, and a wall of text messages is hard to
+# query. This notebook accepts short natural-language requests such as
+# "add a task to submit the GenAI assignment by tomorrow" and turns them into
+# structured SQLite rows.
+#
+# The approach is deliberately small:
+#
+# 1. The user sends a message.
+# 2. The agent asks an OpenAI-compatible chat model for a tool call.
+# 3. Python validates the arguments and executes exactly one of four tools.
+# 4. The tool result goes back to the model for a short confirmation.
+# 5. If the model is unavailable, a deterministic local parser handles the same
+#    common requests, so the notebook still works without a key.
+#
+# Scope: single user, local database, English requests, four operations. The agent
+# never deletes data, never invents a due date, and asks a follow-up question when
+# a request is ambiguous.
+#
 # ## 2. Tech stack and justification
+#
+# | Layer | Choice | Why |
+# |---|---|---|
+# | Interface | Jupyter notebook | The assignment asks for a runnable notebook; cells show each layer. |
+# | Language | Python 3.10+ | Simple standard-library SQLite, dataclasses, and type hints. |
+# | Storage | SQLite | Zero setup, one file, transactions, and enough SQL for this scope. |
+# | Model | OpenAI-compatible chat completions | The same SDK works with NVIDIA's endpoint and a local fake in tests. |
+# | Fallback | Deterministic parser | Keeps the notebook usable offline and makes tests fast and stable. |
+# | Tests | pytest | Plain functions, temporary databases, no network. |
+# | Notebook source | jupytext | Keeps source reviewable in Git while still producing an executed `.ipynb`. |
 #
 # ## 3. Python implementation
 #
 # ### 3.1 Setup and optional imports
-#
-# ## 4. Sample inputs and outputs
-#
-# ## 5. Testing of core functionality and error handling
-#
-# ## 6. Limitations and possible improvements
 
 # %%
 import json
@@ -496,17 +519,17 @@ def parse_local_intent(text: str, today: date | None = None):
         if task_ref:
             return {"name": "get_task_details", "arguments": {"task_ref": task_ref}}
 
-    if re.search(r"\b(mark|complete|finish|done)\b", lowered) and re.search(r"\b(task|assignment|it)\b", lowered):
-        task_ref = extract_reference(text, ["mark", "complete", "finish"])
-        if task_ref:
-            return {"name": "complete_task", "arguments": {"task_ref": task_ref}}
-
     if re.search(r"\b(add|create|make|schedule|remind me to|i need to|i have to|remember to)\b", lowered):
         iso_date, phrase, date_error = parse_due_date(lowered, today)
         title = extract_create_title(text, phrase)
         if date_error:
             return {"name": "add_task", "arguments": {"title": title, "due_date": "__invalid__"}}
         return {"name": "add_task", "arguments": {"title": title, "due_date": iso_date}}
+
+    if re.search(r"\b(mark|complete|finish|done)\b", lowered) and re.search(r"\b(task|assignment|it)\b", lowered):
+        task_ref = extract_reference(text, ["mark", "complete", "finish"])
+        if task_ref:
+            return {"name": "complete_task", "arguments": {"task_ref": task_ref}}
 
     if re.search(r"\b(show|list|display|see|what are)\b", lowered) and re.search(r"\b(task|tasks|todo|pending|completed|done)\b", lowered):
         if re.search(r"\b(pending|to do|todo)\b", lowered):
@@ -797,9 +820,91 @@ def run_eval_cases(cases: list[dict] | None = None, llm_call=None) -> list[dict]
             )
     return results
 
+# %% [markdown]
+# ## 4. Sample inputs and outputs
+#
+# The demo below uses a temporary database and the offline parser. It never touches
+# `tasks.db`. With an LLM configured, the same messages go through the model first.
 
+# %%
+demo_db = os.path.join(tempfile.gettempdir(), "task_manager_demo.db")
+reset_database(demo_db)
+demo_agent = Agent(
+    db_path=demo_db,
+    today=date(2026, 10, 21),
+    llm_call=lambda messages, tools: {"type": "unavailable"},
+)
 
+for message in [
+    "Add a task to submit the GenAI assignment by tomorrow.",
+    "Add a task to buy milk.",
+    "Add a task to finish the Python assignment by 2026-10-28.",
+    "Show me all my pending tasks.",
+    "When is the GenAI assignment due?",
+    "Mark the Python assignment as completed.",
+    "Tell me a joke.",
+]:
+    print(f"User:  {message}")
+    print(f"Agent: {demo_agent.chat(message)}")
+    print()
 
+# %% [markdown]
+# Expected shape:
+#
+# - The first request creates a task with due date `2026-10-22`.
+# - The second request asks for a due date instead of inventing one.
+# - The list includes the generated task ID, status, and due date.
+# - The details request reports the stored due date and status.
+# - The completion request completes the only matching task.
+# - The unknown request gets a short capability message.
 
+# %% [markdown]
+# ## 5. Testing of core functionality and error handling
+#
+# `pytest` covers the database, date parsing, task matching, every tool, the local
+# parser, the LLM client seams, the agent loop, and all twelve evaluation cases.
+# The evaluation cell below runs the same twelve cases in fresh temporary databases.
 
+# %%
+eval_results = run_eval_cases()
+passed = sum(1 for result in eval_results if result["passed"])
+print(f"{passed}/{len(eval_results)} evaluation cases passed")
+for result in eval_results:
+    marker = "PASS" if result["passed"] else "FAIL"
+    print(f"{marker}  {result['id']}")
+    if not result["passed"]:
+        print(f"      checks: {result['checks']}")
+        print(f"      reply:  {result['reply']}")
 
+# %% [markdown]
+# Error paths demonstrated by the tests:
+#
+# | Case | Expected behavior |
+# |---|---|
+# | Missing due date | `needs_due_date`; no row is written. |
+# | Impossible date such as `2026-02-30` | `invalid_date`; the user is asked for a real date. |
+# | Ambiguous title | `ambiguous` with candidate IDs and titles. |
+# | Unknown title | `not_found` with up to three suggestions. |
+# | Already completed | `already_completed`; the row is unchanged. |
+# | Unknown tool or bad arguments | `error`; the agent does not crash. |
+#
+# ## 6. Limitations and possible improvements
+#
+# Limitations:
+#
+# - Single user and a local SQLite file; no accounts, sync, or concurrency control.
+# - Matching is token overlap, not semantic search, so unusual paraphrases can miss.
+# - The local parser understands a small set of English patterns and date phrases.
+# - No reminders, recurrence, time zones, priorities, tags, or calendar integration.
+# - The optional LLM path needs network access and a provider key; it is not tested
+#   against a live provider in the automated suite.
+#
+# Possible improvements:
+#
+# - Add embeddings or fuzzy ranking for task matching, with a confidence threshold.
+# - Add `update_task`, `delete_task`, and an undo window.
+# - Add recurring tasks and reminders through a scheduler.
+# - Store an audit log of every tool call and its result.
+# - Evaluate the live model against the same twelve cases and record pass rates per
+#   model and prompt version.
+# - Package the agent behind a small web UI while keeping the same tool boundary.
