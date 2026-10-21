@@ -1,0 +1,9 @@
+# Runtime, optional in offline mode
+openai>=1.40,<4
+python-dotenv>=1.0,<2
+
+# Development and notebook build
+pytest>=8.0,<10
+jupytext>=1.16,<2
+nbconvert>=7.0,<8
+nbclient>=0.10,<1
