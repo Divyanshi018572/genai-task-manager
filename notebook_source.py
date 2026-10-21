@@ -1,4 +1,4 @@
-# %% [markdown]
+﻿# %% [markdown]
 # # AI-Powered Personal Task Manager
 #
 # ## 1. Problem understanding and proposed approach
@@ -72,6 +72,12 @@ def init_db(db_path: str = DB_PATH) -> None:
             """
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+
+
+def reset_database(db_path: str = DB_PATH) -> None:
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    init_db(db_path)
 
 
 def add_task(title: str, due_date: str, db_path: str = DB_PATH) -> dict:
@@ -618,10 +624,14 @@ class Agent:
         self.llm_call = llm_call or call_llm
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         self.fallback_used = False
+        self.last_tool_calls = []
+        self.last_tool_results = []
 
     def chat(self, user_text: str) -> str:
         self.messages.append({"role": "user", "content": user_text})
         self.fallback_used = False
+        self.last_tool_calls = []
+        self.last_tool_results = []
         tools_used = False
         for _step in range(5):
             result = self.llm_call(to_openai_messages(self.messages), TOOLS)
@@ -649,6 +659,8 @@ class Agent:
                 )
                 for call in calls:
                     tool_result = execute_tool(call["name"], call["arguments"], db_path=self.db_path)
+                    self.last_tool_calls.append({"name": call["name"], "arguments": call["arguments"]})
+                    self.last_tool_results.append(tool_result)
                     self.messages.append(
                         {
                             "role": "tool",
@@ -673,6 +685,8 @@ class Agent:
         if call is None:
             return "I can add, list, complete, or show details for tasks. Try: add task buy milk by tomorrow."
         result = execute_tool(call["name"], call["arguments"], db_path=self.db_path)
+        self.last_tool_calls.append({"name": call["name"], "arguments": call["arguments"]})
+        self.last_tool_results.append(result)
         if result.get("status") == "invalid_date":
             return "That date is not valid. Use a real date such as 2026-10-22."
         return self._reply_from_results([result])
@@ -681,7 +695,13 @@ class Agent:
         lines = []
         for result in results:
             status = result.get("status")
-            if status in {"success", "already_completed"}:
+            data = result.get("data") or {}
+            if status in {"success", "already_completed"} and "tasks" in data:
+                lines.append(result["message"])
+                for task in data["tasks"]:
+                    marker = " (overdue)" if task.get("overdue") else ""
+                    lines.append(f"- #{task['id']} {task['title']} â€” {task['status']}, due {task['due_date']}{marker}")
+            elif status in {"success", "already_completed"}:
                 lines.append("Done: " + result["message"])
             elif status == "needs_due_date":
                 lines.append(result["message"])
@@ -717,6 +737,66 @@ def to_openai_messages(messages: list[dict]) -> list[dict]:
         else:
             converted.append({key: value for key, value in item.items() if key in {"role", "content", "tool_calls"}})
     return converted
+
+# %% [markdown]
+# ### 3.8 Evaluation
+#
+# These cases run against fresh temporary databases. The offline parser is enough
+# to exercise every tool and every main failure path.
+
+# %%
+EVAL_CASES = [
+    {"id": "add_relative", "text": "Add a task to submit the GenAI assignment by tomorrow.", "expected_tool": "add_task", "expected_status": "success", "expected_due": "2026-10-22", "expected_reply_contains": ["submit"]},
+    {"id": "add_missing_due", "text": "Add a task to buy groceries.", "expected_tool": "add_task", "expected_status": "needs_due_date", "expected_reply_contains": ["due date"]},
+    {"id": "list_pending_empty", "text": "Show me all my pending tasks.", "expected_tool": "list_tasks", "expected_status": "success", "expected_arguments": {"status": "pending"}, "expected_reply_contains": ["No pending tasks"]},
+    {"id": "list_pending", "text": "Show me all my pending tasks.", "setup": [{"title": "Read chapter", "due": "2026-10-22"}], "expected_tool": "list_tasks", "expected_status": "success", "expected_arguments": {"status": "pending"}, "expected_reply_contains": ["Read chapter"]},
+    {"id": "complete_by_title", "text": "Mark the Python assignment as completed.", "setup": [{"title": "Python assignment", "due": "2026-10-25"}], "expected_tool": "complete_task", "expected_status": "success", "expected_reply_contains": ["Python assignment"]},
+    {"id": "details_due", "text": "When is the GenAI assignment due?", "setup": [{"title": "GenAI assignment", "due": "2026-10-22"}], "expected_tool": "get_task_details", "expected_status": "success", "expected_due": "2026-10-22", "expected_reply_contains": ["2026-10-22"]},
+    {"id": "unknown_request", "text": "Tell me a joke.", "expected_tool": None, "expected_status": None, "expected_reply_contains": ["I can add"]},
+    {"id": "invalid_date", "text": "Add a task to buy milk by 32nd of Feb.", "expected_tool": "add_task", "expected_status": "invalid_date", "expected_reply_contains": ["not valid"]},
+    {"id": "ambiguous_complete", "text": "Complete the Python assignment.", "setup": [{"title": "Python assignment", "due": "2026-10-22"}, {"title": "Python assignment notes", "due": "2026-10-23"}], "expected_tool": "complete_task", "expected_status": "ambiguous", "expected_reply_contains": ["Which one"]},
+    {"id": "already_completed", "text": "Complete Python assignment.", "setup": [{"title": "Python assignment", "due": "2026-10-22", "completed": True}], "expected_tool": "complete_task", "expected_status": "already_completed", "expected_reply_contains": ["already completed"]},
+    {"id": "complete_not_found", "text": "Complete the chemistry lab assignment.", "expected_tool": "complete_task", "expected_status": "not_found", "expected_reply_contains": ["could not find"]},
+    {"id": "list_all", "text": "Show me all tasks.", "setup": [{"title": "Read chapter", "due": "2026-10-22"}], "expected_tool": "list_tasks", "expected_status": "success", "expected_arguments": {"status": "all"}, "expected_reply_contains": ["Read chapter"]},
+]
+
+
+def run_eval_cases(cases: list[dict] | None = None, llm_call=None) -> list[dict]:
+    cases = cases if cases is not None else EVAL_CASES
+    offline = llm_call or (lambda messages, tools: {"type": "unavailable"})
+    results = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for case in cases:
+            db_path = os.path.join(tmp, f"{case['id']}.db")
+            reset_database(db_path)
+            for setup in case.get("setup", []):
+                added = add_task(setup["title"], setup["due"], db_path)
+                if setup.get("completed"):
+                    complete_task(added["data"]["task"]["id"], db_path)
+            agent = Agent(db_path=db_path, today=date(2026, 10, 21), llm_call=offline)
+            reply = agent.chat(case["text"])
+            call = agent.last_tool_calls[-1] if agent.last_tool_calls else None
+            result = agent.last_tool_results[-1] if agent.last_tool_results else {}
+            checks = {}
+            checks["tool"] = (call or {}).get("name") == case.get("expected_tool")
+            checks["status"] = (result or {}).get("status") == case.get("expected_status")
+            if case.get("expected_due"):
+                task = (result.get("data") or {}).get("task") or {}
+                checks["due"] = task.get("due_date") == case["expected_due"]
+            for key, value in case.get("expected_arguments", {}).items():
+                checks[f"argument:{key}"] = (call or {}).get("arguments", {}).get(key) == value
+            if case.get("expected_reply_contains"):
+                checks["reply"] = all(needle.lower() in reply.lower() for needle in case["expected_reply_contains"])
+            results.append(
+                {
+                    "id": case["id"],
+                    "passed": all(checks.values()),
+                    "checks": checks,
+                    "reply": reply,
+                }
+            )
+    return results
+
 
 
 

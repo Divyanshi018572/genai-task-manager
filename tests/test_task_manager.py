@@ -371,6 +371,14 @@ def test_agent_keeps_tool_messages_out_of_jupyter(db):
     assert any(message.get("role") == "tool" for message in llm.sent)
 
 
+def test_eval_offline_all_cases():
+    results = tm.run_eval_cases()
+    failed = [result for result in results if not result["passed"]]
+    assert len(results) == 12
+    assert failed == []
+
+
+
 
 
 
