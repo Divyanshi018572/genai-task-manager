@@ -22,6 +22,7 @@ One row per commit. Do not tick a box until you have run the command and read th
 | `e25e70a` | Record 12/12 live evaluation | — | Docs only | — | Clean | Pending |
 | `f9ad2f8` | Correct ambiguity traceability in SPEC | — | Docs only | — | Clean | Pending |
 | `b302ac2` | Add Google Colab support and setup | `pytest tests/test_task_manager.py -q` | 48 passed; offline 12/12; clean-room notebook 0 errors | Yes, executed | Clean | Pending |
+| `bbba4d4` | Add Streamlit chat and task UI; fix natural-title extraction | `pytest -q` | 56 passed; AppTest flows pass; notebook 0 errors; offline 12/12; headless UI 200 | Yes, executed | Clean | Pending |
 
 ## Notes
 
