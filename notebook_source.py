@@ -447,5 +447,74 @@ def execute_tool(name: str, arguments: dict, db_path: str = DB_PATH) -> dict:
     except Exception as error:
         return {"status": "error", "message": f"Tool failed: {error}"}
 
+# %% [markdown]
+# ### 3.5 Local parser
+#
+# The parser recognizes common requests without an API key. It is deliberately
+# narrow: anything it does not understand returns None and gets a friendly reply.
+
+# %%
+def extract_reference(text: str, leading_phrases: list[str]) -> str:
+    quoted = re.search(r"""['"]([^'"]+)['"]""", text)
+    if quoted:
+        return quoted.group(1).strip(" .,!?:;")
+
+    value = text.strip(" .,!?:;")
+    value = re.sub(r"(?i)^\s*please\s+", "", value)
+    for phrase in sorted(leading_phrases, key=len, reverse=True):
+        value = re.sub(r"(?i)^\s*" + re.escape(phrase) + r"\b\s*", "", value)
+
+    for _ in range(2):
+        value = re.sub(
+            r"(?i)\s+(and\s+)?(is\s+it\s+)?(as\s+)?(done|completed|complete|overdue|pending|due)\s*$",
+            "",
+            value,
+        )
+
+    value = re.sub(r"(?i)^\s*(the|my)\s+", "", value)
+    return value.strip(" .,!?:;")
+
+
+def parse_local_intent(text: str, today: date | None = None):
+    today = today or date.today()
+    lowered = text.lower().strip()
+
+    details_request = (
+        re.search(r"\b(when|details?|status|due)\b", lowered)
+        or re.search(r"\bis\b.*\b(done|completed)\b", lowered)
+    )
+    if details_request and re.search(r"\b(task|assignment|it)\b", lowered):
+        task_ref = extract_reference(
+            text, ["when is", "when's", "details of", "details for", "status of", "is"]
+        )
+        if task_ref:
+            return {"name": "get_task_details", "arguments": {"task_ref": task_ref}}
+
+    if re.search(r"\b(mark|complete|finish|done)\b", lowered) and re.search(r"\b(task|assignment|it)\b", lowered):
+        task_ref = extract_reference(text, ["mark", "complete", "finish"])
+        if task_ref:
+            return {"name": "complete_task", "arguments": {"task_ref": task_ref}}
+
+    if re.search(r"\b(add|create|make|schedule|remind me to|i need to|i have to|remember to)\b", lowered):
+        iso_date, phrase, date_error = parse_due_date(lowered, today)
+        title = extract_create_title(text, phrase)
+        if date_error:
+            return {"name": "add_task", "arguments": {"title": title, "due_date": "__invalid__"}}
+        return {"name": "add_task", "arguments": {"title": title, "due_date": iso_date}}
+
+    if re.search(r"\b(show|list|display|see|what are)\b", lowered) and re.search(r"\b(task|tasks|todo|pending|completed|done)\b", lowered):
+        if re.search(r"\b(pending|to do|todo)\b", lowered):
+            status = "pending"
+        elif re.search(r"\b(completed|done)\b", lowered):
+            status = "completed"
+        elif re.search(r"\ball\b", lowered):
+            status = "all"
+        else:
+            status = "pending"
+        return {"name": "list_tasks", "arguments": {"status": status}}
+
+    return None
+
+
 
 

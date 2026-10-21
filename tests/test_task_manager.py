@@ -168,3 +168,48 @@ def test_details_include_due_and_status(db):
     assert task["status"] == "pending"
 
 
+def test_local_parser_examples():
+    call = tm.parse_local_intent(
+        "Add a task to prepare for the GenAI assignment by tomorrow.", TODAY
+    )
+    assert call["name"] == "add_task"
+    assert call["arguments"]["due_date"] == "2026-10-22"
+    assert call["arguments"]["title"] == "Prepare for the GenAI assignment"
+
+    call = tm.parse_local_intent("Show me all my pending tasks.", TODAY)
+    assert call["name"] == "list_tasks"
+    assert call["arguments"]["status"] == "pending"
+
+    call = tm.parse_local_intent("Mark the Python assignment as completed.", TODAY)
+    assert call["name"] == "complete_task"
+    assert "python assignment" in call["arguments"]["task_ref"].lower()
+
+
+def test_local_parser_missing_due_date():
+    call = tm.parse_local_intent("Add a task to buy milk.", TODAY)
+    assert call["name"] == "add_task"
+    assert call["arguments"]["due_date"] is None
+
+
+def test_local_parser_details():
+    call = tm.parse_local_intent("When is the GenAI assignment due?", TODAY)
+    assert call["name"] == "get_task_details"
+    assert "genai assignment" in call["arguments"]["task_ref"].lower()
+
+
+def test_local_parser_unknown():
+    assert tm.parse_local_intent("Tell me a joke.", TODAY) is None
+
+
+def test_local_parser_invalid_date():
+    call = tm.parse_local_intent("Add a task to buy milk by 32nd of Feb.", TODAY)
+    assert call["name"] == "add_task"
+    assert call["arguments"]["due_date"] == "__invalid__"
+
+
+def test_local_parser_pending_not_all():
+    call = tm.parse_local_intent("Show me all my pending tasks.", TODAY)
+    assert call["arguments"]["status"] == "pending"
+
+
+
