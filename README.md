@@ -64,7 +64,8 @@ The agent asks the model for one tool call at a time. Python validates the
 arguments, runs SQLite, and sends the result back to the model for a short
 confirmation. Tool messages stay inside the loop; only the final reply reaches the
 user. The model can choose `add_task`, `list_tasks`, `complete_task`, or
-`get_task_details`.
+`get_task_details`. Completion requests have a deterministic guard: if the model
+does not call `complete_task`, the local parser executes it.
 
 If no model is configured, the local parser handles common English requests and
 returns the same result shape. Ambiguous titles return candidate IDs, unknown

@@ -379,6 +379,24 @@ def test_agent_keeps_tool_messages_out_of_jupyter(db):
     assert any(message.get("role") == "tool" for message in llm.sent)
 
 
+def test_completion_guard_when_model_skips_tool(db):
+    class WrongToolLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                return {"type": "tool_calls", "calls": [{"id": "1", "name": "list_tasks", "arguments": {"status": "pending"}}]}
+            return {"type": "text", "content": "That task does not exist."}
+
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=WrongToolLLM())
+    reply = agent.chat("Complete the chemistry lab assignment.")
+    assert agent.last_tool_calls[-1]["name"] == "complete_task"
+    assert agent.last_tool_results[-1]["status"] == "not_found"
+    assert "could not find" in reply.lower()
+
+
 def test_eval_offline_all_cases():
     results = tm.run_eval_cases()
     failed = [result for result in results if not result["passed"]]

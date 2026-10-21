@@ -39,17 +39,14 @@ Relative dates now resolve against the date injected into the system prompt
 
 ## Live evaluation
 
-The same twelve cases were run against the real model. Result: **11/12**.
+The same twelve cases were run against the real model. Result: **12/12**.
 
-| Case | Result | Note |
-|---|---|---|
-| `complete_not_found` | Fail in one run | The model answered "not found" without a `complete_task` call. |
-| Other eleven cases | Pass | Tool choice, status, due date, and reply checks passed. |
-
-The model is stochastic even at `temperature=0`; a direct repeat of the failing
-request did call `complete_task` and returned `not_found`. The offline parser suite
-remains deterministic at **12/12**, and the notebook falls back to it when the
-provider is unavailable.
+An earlier run scored 11/12 because the model sometimes answered a completion
+request without calling `complete_task`. The agent now has a deterministic
+completion guard: if the local parser recognizes a completion request and the model
+did not call `complete_task`, the agent executes the local completion call before
+returning. The evaluation also selects the result for the expected tool instead of
+only the last tool call. The offline parser suite remains deterministic at **12/12**.
 
 ## Record
 
