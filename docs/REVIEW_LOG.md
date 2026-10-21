@@ -15,6 +15,7 @@ One row per commit. Do not tick a box until you have run the command and read th
 | `3bcf19e` | Remove stray BOM | `pytest tests/test_task_manager.py -q` | 45 passed | Yes, executed | Clean | Pending |
 | Final working tree | Full notebook sections and docs | `pytest tests/test_task_manager.py -q` | 46 passed; eval 12/12 | Yes, executed | Clean | Pending |
 | `32d7464` | Inject today into prompt; verify NVIDIA provider | `pytest tests/test_task_manager.py -q` | 46 passed; live tool calls passed | Yes, executed | Clean | Pending |
+| `cdf9f40` | Normalize reply checks; record live eval | `pytest tests/test_task_manager.py -q` | 47 passed; offline 12/12; live 11/12 | Yes, executed | Clean | Pending |
 
 ## Notes
 
