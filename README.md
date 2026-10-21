@@ -30,7 +30,7 @@ Copy `.env.example` to `.env` and fill in the provider values. Do not commit `.e
 ```text
 LLM_API_KEY=
 LLM_BASE_URL=https://integrate.api.nvidia.com/v1
-LLM_MODEL=openai/gpt-oss-20b
+LLM_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 LLM_FALLBACK_API_KEY=
 LLM_FALLBACK_BASE_URL=
 LLM_FALLBACK_MODEL=

@@ -634,6 +634,7 @@ SYSTEM_PROMPT = """You are a concise task manager.
 Rules:
 - Use one tool at a time.
 - Ask for a due date if the user does not give one.
+- Resolve relative dates such as "tomorrow" against today's date.
 - Never invent a task ID or a due date.
 - If the user asks for details, use get_task_details.
 - Keep final replies short and plain.
@@ -645,7 +646,12 @@ class Agent:
         self.db_path = db_path
         self.today = today or date.today()
         self.llm_call = llm_call or call_llm
-        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self.messages = [
+            {
+                "role": "system",
+                "content": f"{SYSTEM_PROMPT}\nToday is {self.today.isoformat()}. Resolve relative dates against it.",
+            }
+        ]
         self.fallback_used = False
         self.last_tool_calls = []
         self.last_tool_results = []
@@ -827,26 +833,27 @@ def run_eval_cases(cases: list[dict] | None = None, llm_call=None) -> list[dict]
 # `tasks.db`. With an LLM configured, the same messages go through the model first.
 
 # %%
-demo_db = os.path.join(tempfile.gettempdir(), "task_manager_demo.db")
-reset_database(demo_db)
-demo_agent = Agent(
-    db_path=demo_db,
-    today=date(2026, 10, 21),
-    llm_call=lambda messages, tools: {"type": "unavailable"},
-)
+if __name__ == "__main__":
+    demo_db = os.path.join(tempfile.gettempdir(), "task_manager_demo.db")
+    reset_database(demo_db)
+    demo_agent = Agent(
+        db_path=demo_db,
+        today=date(2026, 10, 21),
+        llm_call=lambda messages, tools: {"type": "unavailable"},
+    )
 
-for message in [
-    "Add a task to submit the GenAI assignment by tomorrow.",
-    "Add a task to buy milk.",
-    "Add a task to finish the Python assignment by 2026-10-28.",
-    "Show me all my pending tasks.",
-    "When is the GenAI assignment due?",
-    "Mark the Python assignment as completed.",
-    "Tell me a joke.",
-]:
-    print(f"User:  {message}")
-    print(f"Agent: {demo_agent.chat(message)}")
-    print()
+    for message in [
+        "Add a task to submit the GenAI assignment by tomorrow.",
+        "Add a task to buy milk.",
+        "Add a task to finish the Python assignment by 2026-10-28.",
+        "Show me all my pending tasks.",
+        "When is the GenAI assignment due?",
+        "Mark the Python assignment as completed.",
+        "Tell me a joke.",
+    ]:
+        print(f"User:  {message}")
+        print(f"Agent: {demo_agent.chat(message)}")
+        print()
 
 # %% [markdown]
 # Expected shape:
@@ -866,15 +873,16 @@ for message in [
 # The evaluation cell below runs the same twelve cases in fresh temporary databases.
 
 # %%
-eval_results = run_eval_cases()
-passed = sum(1 for result in eval_results if result["passed"])
-print(f"{passed}/{len(eval_results)} evaluation cases passed")
-for result in eval_results:
-    marker = "PASS" if result["passed"] else "FAIL"
-    print(f"{marker}  {result['id']}")
-    if not result["passed"]:
-        print(f"      checks: {result['checks']}")
-        print(f"      reply:  {result['reply']}")
+if __name__ == "__main__":
+    eval_results = run_eval_cases()
+    passed = sum(1 for result in eval_results if result["passed"])
+    print(f"{passed}/{len(eval_results)} evaluation cases passed")
+    for result in eval_results:
+        marker = "PASS" if result["passed"] else "FAIL"
+        print(f"{marker}  {result['id']}")
+        if not result["passed"]:
+            print(f"      checks: {result['checks']}")
+            print(f"      reply:  {result['reply']}")
 
 # %% [markdown]
 # Error paths demonstrated by the tests:

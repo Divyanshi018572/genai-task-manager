@@ -248,6 +248,7 @@ def test_load_configs_reads_primary(monkeypatch):
 
 def test_agent_offline(db):
     agent = tm.Agent(db_path=db, today=TODAY, llm_call=lambda messages, tools: {"type": "unavailable"})
+    assert TODAY.isoformat() in agent.messages[0]["content"]
     reply = agent.chat("Add a task to buy milk by tomorrow.")
     assert "Buy milk" in reply
     assert "2026-10-22" in reply
