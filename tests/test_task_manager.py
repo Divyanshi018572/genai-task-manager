@@ -212,4 +212,32 @@ def test_local_parser_pending_not_all():
     assert call["arguments"]["status"] == "pending"
 
 
+def test_fake_llm_returns_responses():
+    fake = tm.FakeLLM([{"type": "text", "content": "hello"}])
+    assert fake([], [])["content"] == "hello"
+    assert fake([], [])["type"] == "error"
+
+
+def test_load_configs_requires_base_url(monkeypatch):
+    monkeypatch.setattr(tm, "load_dotenv", None, raising=False)
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_FALLBACK_API_KEY", raising=False)
+    assert tm.load_llm_configs() == []
+
+
+def test_load_configs_reads_primary(monkeypatch):
+    monkeypatch.setattr(tm, "load_dotenv", None, raising=False)
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.delenv("LLM_FALLBACK_API_KEY", raising=False)
+    configs = tm.load_llm_configs()
+    assert len(configs) == 1
+    assert configs[0].model == "test-model"
+    assert configs[0].base_url == "https://example.test/v1"
+
+
+
 

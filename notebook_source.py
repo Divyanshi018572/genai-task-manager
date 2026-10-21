@@ -515,6 +515,85 @@ def parse_local_intent(text: str, today: date | None = None):
 
     return None
 
+# %% [markdown]
+# ### 3.6 LLM client
+#
+# The client is optional. It points the OpenAI SDK at an OpenAI-compatible base URL
+# and returns one of three shapes: tool calls, text, or an error.
+
+# %%
+@dataclass
+class LLMConfig:
+    api_key: str
+    base_url: str
+    model: str
+    label: str
+
+
+def load_llm_configs() -> list[LLMConfig]:
+    if load_dotenv is not None:
+        load_dotenv()
+    configs = []
+    primary_key = os.getenv("LLM_API_KEY", "").strip()
+    primary_base = os.getenv("LLM_BASE_URL", "").strip()
+    primary_model = os.getenv("LLM_MODEL", "").strip()
+    if primary_key and primary_base and primary_model:
+        configs.append(LLMConfig(primary_key, primary_base, primary_model, "primary"))
+    fallback_key = os.getenv("LLM_FALLBACK_API_KEY", "").strip()
+    fallback_base = os.getenv("LLM_FALLBACK_BASE_URL", "").strip()
+    fallback_model = os.getenv("LLM_FALLBACK_MODEL", "").strip()
+    if fallback_key and fallback_base and fallback_model:
+        configs.append(LLMConfig(fallback_key, fallback_base, fallback_model, "fallback"))
+    return configs
+
+
+def call_llm(messages: list[dict], tools: list[dict], configs: list[LLMConfig] | None = None) -> dict:
+    configs = configs if configs is not None else load_llm_configs()
+    if not configs:
+        return {"type": "unavailable", "message": "No LLM configured."}
+    if OpenAI is None:
+        return {"type": "unavailable", "message": "The openai package is not installed."}
+    last_error = ""
+    for config in configs:
+        try:
+            client = OpenAI(api_key=config.api_key, base_url=config.base_url, timeout=30.0, max_retries=2)
+            response = client.chat.completions.create(
+                model=config.model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0,
+            )
+            message = response.choices[0].message
+            if message.tool_calls:
+                return {
+                    "type": "tool_calls",
+                    "provider": config.label,
+                    "calls": [
+                        {"id": call.id, "name": call.function.name, "arguments": json.loads(call.function.arguments)}
+                        for call in message.tool_calls
+                    ],
+                }
+            if message.content:
+                return {"type": "text", "provider": config.label, "content": message.content}
+            last_error = "The provider returned an empty response."
+        except json.JSONDecodeError:
+            return {"type": "error", "message": "The model returned invalid JSON for the tool arguments."}
+        except Exception as error:
+            last_error = f"{config.label} failed: {type(error).__name__}"
+    return {"type": "error", "message": last_error}
+
+
+class FakeLLM:
+    def __init__(self, responses: list[dict]):
+        self.responses = list(responses)
+
+    def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
+        if not self.responses:
+            return {"type": "error", "message": "No fake responses left."}
+        return self.responses.pop(0)
+
+
 
 
 
