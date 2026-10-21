@@ -593,6 +593,132 @@ class FakeLLM:
             return {"type": "error", "message": "No fake responses left."}
         return self.responses.pop(0)
 
+# %% [markdown]
+# ### 3.7 Agent loop
+#
+# The agent decides between a model call and the local parser. Tool results stay
+# inside the agent loop. Only the final user-facing reply is returned.
+
+# %%
+SYSTEM_PROMPT = """You are a concise task manager.
+
+Rules:
+- Use one tool at a time.
+- Ask for a due date if the user does not give one.
+- Never invent a task ID or a due date.
+- If the user asks for details, use get_task_details.
+- Keep final replies short and plain.
+"""
+
+
+class Agent:
+    def __init__(self, db_path: str = DB_PATH, today: date | None = None, llm_call=None):
+        self.db_path = db_path
+        self.today = today or date.today()
+        self.llm_call = llm_call or call_llm
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self.fallback_used = False
+
+    def chat(self, user_text: str) -> str:
+        self.messages.append({"role": "user", "content": user_text})
+        self.fallback_used = False
+        tools_used = False
+        for _step in range(5):
+            result = self.llm_call(to_openai_messages(self.messages), TOOLS)
+            if result.get("type") == "tool_calls":
+                calls = result.get("calls") or []
+                if not calls:
+                    return self._local_reply(user_text)
+                tools_used = True
+                self.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": call["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": call["name"],
+                                    "arguments": json.dumps(call["arguments"]),
+                                },
+                            }
+                            for call in calls
+                        ],
+                    }
+                )
+                for call in calls:
+                    tool_result = execute_tool(call["name"], call["arguments"], db_path=self.db_path)
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "name": call["name"],
+                            "content": json.dumps(tool_result),
+                        }
+                    )
+                continue
+            if result.get("type") == "text":
+                if tools_used:
+                    self.messages.append({"role": "assistant", "content": result["content"]})
+                    return result["content"]
+                return self._local_reply(user_text)
+            return self._local_reply(user_text)
+
+        return "I stopped after several tool steps. Please say that in a simpler way."
+
+    def _local_reply(self, user_text: str) -> str:
+        self.fallback_used = True
+        call = parse_local_intent(user_text, self.today)
+        if call is None:
+            return "I can add, list, complete, or show details for tasks. Try: add task buy milk by tomorrow."
+        result = execute_tool(call["name"], call["arguments"], db_path=self.db_path)
+        if result.get("status") == "invalid_date":
+            return "That date is not valid. Use a real date such as 2026-10-22."
+        return self._reply_from_results([result])
+
+    def _reply_from_results(self, results: list[dict]) -> str:
+        lines = []
+        for result in results:
+            status = result.get("status")
+            if status in {"success", "already_completed"}:
+                lines.append("Done: " + result["message"])
+            elif status == "needs_due_date":
+                lines.append(result["message"])
+            elif status == "ambiguous":
+                lines.append(result["message"])
+                lines.extend(f"- #{task['id']} {task['title']}" for task in result.get("data", {}).get("candidates", []))
+            elif status == "not_found":
+                lines.append(result["message"])
+                suggestions = result.get("data", {}).get("suggestions", [])
+                if suggestions:
+                    lines.append("Did you mean:")
+                    lines.extend(f"- {task['title']} (due {task['due_date']})" for task in suggestions)
+            elif status == "invalid_date":
+                lines.append("That date is not valid. Use a real date such as 2026-10-22.")
+            elif status == "error":
+                lines.append(result["message"])
+            else:
+                lines.append(str(result))
+        return "\n".join(lines)
+
+
+def to_openai_messages(messages: list[dict]) -> list[dict]:
+    converted = []
+    for item in messages:
+        role = item.get("role")
+        if role == "system":
+            content = item.get("content")
+            if isinstance(content, list):
+                content = "\n".join(str(part) for part in content)
+            converted.append({"role": "system", "content": content or ""})
+        elif role == "tool":
+            converted.append({"role": "tool", "tool_call_id": item["tool_call_id"], "content": item.get("content", "")})
+        else:
+            converted.append({key: value for key, value in item.items() if key in {"role", "content", "tool_calls"}})
+    return converted
+
+
 
 
 

@@ -239,5 +239,138 @@ def test_load_configs_reads_primary(monkeypatch):
     assert configs[0].base_url == "https://example.test/v1"
 
 
+def test_agent_offline(db):
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=lambda messages, tools: {"type": "unavailable"})
+    reply = agent.chat("Add a task to buy milk by tomorrow.")
+    assert "Buy milk" in reply
+    assert "2026-10-22" in reply
+    assert agent.fallback_used is True
+
+
+def test_agent_unknown(db):
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=lambda messages, tools: {"type": "unavailable"})
+    reply = agent.chat("Tell me a joke.")
+    assert "add" in reply.lower()
+    assert "list" in reply.lower()
+
+
+def test_fake_llm_tool_call_then_text(db):
+    fake = tm.FakeLLM([
+        {"type": "tool_calls", "calls": [{"id": "1", "name": "add_task", "arguments": {"title": "Read chapter", "due_date": "2026-10-22"}}]},
+        {"type": "text", "content": "Added Read chapter for 2026-10-22."},
+    ])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("Add a task to read a chapter by tomorrow.")
+    assert "Added" in reply
+    assert agent.fallback_used is False
+    listing = tm.tool_list_tasks("pending", db_path=db)
+    assert listing["data"]["tasks"][0]["title"] == "Read chapter"
+
+
+def test_llm_error_falls_back_to_local_parser(db):
+    fake = tm.FakeLLM([{"type": "error", "message": "provider down"}, {"type": "error", "message": "provider down"}])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("Add a task to buy milk by tomorrow.")
+    assert "Buy milk" in reply
+    assert agent.fallback_used is True
+
+
+def test_agent_text_only_falls_back_to_parser(db):
+    fake = tm.FakeLLM([{"type": "text", "content": "I think I added that."}])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("Add a task to buy milk by tomorrow.")
+    assert "Buy milk" in reply
+    listing = tm.tool_list_tasks("pending", db_path=db)
+    assert listing["data"]["tasks"][0]["title"] == "Buy milk"
+
+
+def test_agent_ambiguous(db):
+    tm.tool_add_task("Python assignment", "2026-10-22", db_path=db)
+    tm.tool_add_task("Python reading", "2026-10-23", db_path=db)
+    fake = tm.FakeLLM([
+        {"type": "tool_calls", "calls": [{"id": "1", "name": "complete_task", "arguments": {"task_ref": "Python"}}]},
+        {"type": "text", "content": "Which one do you mean?"},
+    ])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("Complete Python.")
+    assert "Which one" in reply
+
+
+def test_agent_needs_due_date(db):
+    fake = tm.FakeLLM([
+        {"type": "tool_calls", "calls": [{"id": "1", "name": "add_task", "arguments": {"title": "Buy milk"}}]},
+        {"type": "text", "content": "What due date should I use for Buy milk?"},
+    ])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("Add a task to buy milk.")
+    assert "due date" in reply.lower()
+    assert tm.tool_list_tasks("pending", db_path=db)["data"]["tasks"] == []
+
+
+def test_agent_already_completed(db):
+    added = tm.tool_add_task("Python assignment", "2026-10-22", db_path=db)
+    tm.tool_complete_task(str(added["data"]["task"]["id"]), db_path=db)
+    fake = tm.FakeLLM([
+        {"type": "tool_calls", "calls": [{"id": "1", "name": "complete_task", "arguments": {"task_ref": "Python assignment"}}]},
+        {"type": "text", "content": "It is already completed."},
+    ])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("Complete Python assignment.")
+    assert "already completed" in reply.lower()
+
+
+def test_agent_invalid_date(db):
+    fake = tm.FakeLLM([
+        {"type": "tool_calls", "calls": [{"id": "1", "name": "add_task", "arguments": {"title": "Buy milk", "due_date": "2026-02-30"}}]},
+        {"type": "text", "content": "That date is not valid."},
+    ])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("Add a task to buy milk by 30 Feb.")
+    assert "not valid" in reply.lower()
+
+
+def test_agent_list(db):
+    tm.tool_add_task("Read chapter", "2026-10-22", db_path=db)
+    fake = tm.FakeLLM([
+        {"type": "tool_calls", "calls": [{"id": "1", "name": "list_tasks", "arguments": {"status": "pending"}}]},
+        {"type": "text", "content": "You have 1 pending task: Read chapter."},
+    ])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("What are my pending tasks?")
+    assert "Read chapter" in reply
+
+
+def test_agent_details(db):
+    tm.tool_add_task("GenAI assignment", "2026-10-22", db_path=db)
+    fake = tm.FakeLLM([
+        {"type": "tool_calls", "calls": [{"id": "1", "name": "get_task_details", "arguments": {"task_ref": "GenAI assignment"}}]},
+        {"type": "text", "content": "It is due on 2026-10-22 and is pending."},
+    ])
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=fake)
+    reply = agent.chat("When is GenAI assignment due?")
+    assert "2026-10-22" in reply
+    assert "pending" in reply.lower()
+
+
+def test_agent_keeps_tool_messages_out_of_jupyter(db):
+    class InspectingLLM:
+        def __init__(self):
+            self.calls = 0
+            self.sent = []
+
+        def __call__(self, messages, tools):
+            self.calls += 1
+            self.sent = list(messages)
+            if self.calls == 1:
+                return {"type": "tool_calls", "calls": [{"id": "1", "name": "list_tasks", "arguments": {"status": "pending"}}]}
+            return {"type": "text", "content": "No pending tasks."}
+
+    llm = InspectingLLM()
+    agent = tm.Agent(db_path=db, today=TODAY, llm_call=llm)
+    agent.chat("List pending tasks.")
+    assert any(message.get("role") == "tool" for message in llm.sent)
+
+
+
 
 
