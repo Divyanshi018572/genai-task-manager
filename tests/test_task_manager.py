@@ -62,3 +62,43 @@ def test_persistence_after_reopen(db):
     listing = tm.list_tasks("pending", db_path=db)
     assert len(listing) == 1
     assert listing[0]["due_date"] == "2026-10-22"
+
+
+def test_parse_dates():
+    assert tm.parse_due_date("by tomorrow", TODAY)[0] == "2026-10-22"
+    assert tm.parse_due_date("today", TODAY)[0] == "2026-10-21"
+    assert tm.parse_due_date("in 3 days", TODAY)[0] == "2026-10-24"
+    assert tm.parse_due_date("next Friday", TODAY)[0] == "2026-10-23"
+    assert tm.parse_due_date("2026-10-25", TODAY)[0] == "2026-10-25"
+    assert tm.parse_due_date("25 Oct 2026", TODAY)[0] == "2026-10-25"
+    assert tm.parse_due_date("25 October 2026", TODAY)[0] == "2026-10-25"
+
+
+def test_parse_weekday_on_same_day():
+    friday = date(2026, 10, 23)
+    assert tm.parse_due_date("Friday", friday)[0] == "2026-10-23"
+    assert tm.parse_due_date("next Friday", friday)[0] == "2026-10-30"
+
+
+def test_parse_invalid_date():
+    iso, phrase, error = tm.parse_due_date("32nd of Feb", TODAY)
+    assert iso is None
+    assert phrase == "32nd of feb"
+    assert error
+
+
+def test_extract_title():
+    assert tm.extract_create_title(
+        "Add a task to prepare for the GenAI assignment by tomorrow.", "tomorrow"
+    ) == "Prepare for the GenAI assignment"
+    assert tm.extract_create_title(
+        "Add task: submit report on 25 Oct 2026", "25 Oct 2026"
+    ) == "Submit report"
+
+
+def test_matching_is_case_insensitive(db):
+    tm.add_task("Python assignment", "2026-10-22", db_path=db)
+    matches = tm.find_tasks("mark PYTHON assignment done", status="pending", db_path=db)
+    assert len(matches) == 1
+    assert matches[0]["title"] == "Python assignment"
+
