@@ -37,6 +37,20 @@ REPLY: Pending tasks:
 Relative dates now resolve against the date injected into the system prompt
 (`2026-10-21` in the check).
 
+## Live evaluation
+
+The same twelve cases were run against the real model. Result: **11/12**.
+
+| Case | Result | Note |
+|---|---|---|
+| `complete_not_found` | Fail in one run | The model answered "not found" without a `complete_task` call. |
+| Other eleven cases | Pass | Tool choice, status, due date, and reply checks passed. |
+
+The model is stochastic even at `temperature=0`; a direct repeat of the failing
+request did call `complete_task` and returned `not_found`. The offline parser suite
+remains deterministic at **12/12**, and the notebook falls back to it when the
+provider is unavailable.
+
 ## Record
 
 | Date | Provider | Base URL | Model | Result | Observed reply or error |

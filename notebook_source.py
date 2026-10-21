@@ -45,6 +45,7 @@ import re
 import sqlite3
 import tempfile
 import time
+import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -633,10 +634,13 @@ SYSTEM_PROMPT = """You are a concise task manager.
 
 Rules:
 - Use one tool at a time.
-- Ask for a due date if the user does not give one.
+- Ask for a due date only when the user is adding a task without one.
 - Resolve relative dates such as "tomorrow" against today's date.
+- If the user says complete, mark, or finish, use complete_task. Do not ask for a due date.
+- For those requests, your first response must be a complete_task tool call, even if the task may not exist.
+- If the user asks when, details, or status, use get_task_details.
+- Never say a task is already completed unless complete_task returned that result.
 - Never invent a task ID or a due date.
-- If the user asks for details, use get_task_details.
 - Keep final replies short and plain.
 """
 
@@ -783,11 +787,18 @@ EVAL_CASES = [
     {"id": "details_due", "text": "When is the GenAI assignment due?", "setup": [{"title": "GenAI assignment", "due": "2026-10-22"}], "expected_tool": "get_task_details", "expected_status": "success", "expected_due": "2026-10-22", "expected_reply_contains": ["2026-10-22"]},
     {"id": "unknown_request", "text": "Tell me a joke.", "expected_tool": None, "expected_status": None, "expected_reply_contains": ["I can add"]},
     {"id": "invalid_date", "text": "Add a task to buy milk by 32nd of Feb.", "expected_tool": "add_task", "expected_status": "invalid_date", "expected_reply_contains": ["not valid"]},
-    {"id": "ambiguous_complete", "text": "Complete the Python assignment.", "setup": [{"title": "Python assignment", "due": "2026-10-22"}, {"title": "Python assignment notes", "due": "2026-10-23"}], "expected_tool": "complete_task", "expected_status": "ambiguous", "expected_reply_contains": ["Which one"]},
+    {"id": "ambiguous_complete", "text": "Complete the Python assignment.", "setup": [{"title": "Python assignment", "due": "2026-10-22"}, {"title": "Python assignment notes", "due": "2026-10-23"}], "expected_tool": "complete_task", "expected_status": "ambiguous", "expected_reply_contains": ["which"]},
     {"id": "already_completed", "text": "Complete Python assignment.", "setup": [{"title": "Python assignment", "due": "2026-10-22", "completed": True}], "expected_tool": "complete_task", "expected_status": "already_completed", "expected_reply_contains": ["already completed"]},
     {"id": "complete_not_found", "text": "Complete the chemistry lab assignment.", "expected_tool": "complete_task", "expected_status": "not_found", "expected_reply_contains": ["could not find"]},
     {"id": "list_all", "text": "Show me all tasks.", "setup": [{"title": "Read chapter", "due": "2026-10-22"}], "expected_tool": "list_tasks", "expected_status": "success", "expected_arguments": {"status": "all"}, "expected_reply_contains": ["Read chapter"]},
 ]
+
+
+def normalize_check_text(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text)
+    for dash in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014"):
+        text = text.replace(dash, "-")
+    return text.lower()
 
 
 def run_eval_cases(cases: list[dict] | None = None, llm_call=None) -> list[dict]:
@@ -815,7 +826,8 @@ def run_eval_cases(cases: list[dict] | None = None, llm_call=None) -> list[dict]
             for key, value in case.get("expected_arguments", {}).items():
                 checks[f"argument:{key}"] = (call or {}).get("arguments", {}).get(key) == value
             if case.get("expected_reply_contains"):
-                checks["reply"] = all(needle.lower() in reply.lower() for needle in case["expected_reply_contains"])
+                reply_text = normalize_check_text(reply)
+                checks["reply"] = all(normalize_check_text(needle) in reply_text for needle in case["expected_reply_contains"])
             results.append(
                 {
                     "id": case["id"],

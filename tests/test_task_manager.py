@@ -386,6 +386,11 @@ def test_eval_offline_all_cases():
     assert failed == []
 
 
+def test_normalize_check_text_handles_unicode_dashes():
+    assert tm.normalize_check_text("due 2026\u201110\u201122") == "due 2026-10-22"
+
+
+
 
 
 
