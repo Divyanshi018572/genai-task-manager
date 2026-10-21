@@ -1,6 +1,10 @@
 # %% [markdown]
 # # AI-Powered Personal Task Manager
 #
+# > **Google Colab:** upload this `.ipynb`, then choose **Runtime > Run all**. The
+# > demo and the 12-case evaluation run offline and need no key. For live model mode,
+# > uncomment the optional setup cell below and install `openai`.
+#
 # ## 1. Problem understanding and proposed approach
 #
 # A personal task manager should remove the friction between thinking of a task and
@@ -59,6 +63,18 @@ try:
     from dotenv import load_dotenv
 except ImportError:
     load_dotenv = None
+
+# %% [markdown]
+# **Optional live model setup for Colab.** Uncomment and run only if you want to use
+# the NVIDIA endpoint. The offline demo and evaluation do not need this cell.
+
+# %%
+# !pip -q install openai
+# import os
+# from getpass import getpass
+# os.environ["LLM_API_KEY"] = getpass("NVIDIA API key: ")
+# os.environ["LLM_BASE_URL"] = "https://integrate.api.nvidia.com/v1"
+# os.environ["LLM_MODEL"] = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 # %% [markdown]
 # ### 3.2 Database

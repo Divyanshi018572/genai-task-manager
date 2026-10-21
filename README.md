@@ -23,6 +23,16 @@ Open `task_manager.ipynb` in Jupyter and run all cells. Offline mode is the defa
 and needs no key. The notebook creates its own demo database in the system temp
 directory.
 
+## Google Colab
+
+1. Go to https://colab.research.google.com.
+2. Choose **File > Upload notebook** and select `task_manager.ipynb`.
+3. Choose **Runtime > Run all**.
+
+Offline mode needs no installation or key. For live model mode, uncomment the
+optional setup cell in the notebook, install `openai`, and enter the key through the
+hidden `getpass` prompt. Do not paste the key into a code cell or commit it.
+
 ## Optional model configuration
 
 Copy `.env.example` to `.env` and fill in the provider values. Do not commit `.env`.
