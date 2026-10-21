@@ -1,4 +1,4 @@
-﻿# %% [markdown]
+# %% [markdown]
 # # AI-Powered Personal Task Manager
 #
 # ## 1. Problem understanding and proposed approach
